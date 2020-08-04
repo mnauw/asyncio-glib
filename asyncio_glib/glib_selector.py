@@ -8,13 +8,20 @@ __all__ = (
 )
 
 
-# The override for GLib.MainLoop.run installs a signal wakeup fd,
+# The override for GLib.MainLoop installs a signal wakeup fd,
 # which interferes with asyncio signal handlers.  Try to get the
 # direct version.
-try:
-    g_main_loop_run = super(GLib.MainLoop, GLib.MainLoop).run
-except AttributeError:
-    g_main_loop_run = GLib.MainLoop.run
+
+MainLoop = GLib.MainLoop
+RawMainLoop = MainLoop.__bases__[0]
+RawMainLoop = RawMainLoop if hasattr(RawMainLoop, 'run') else MainLoop
+
+
+class BasicMainLoop(RawMainLoop):
+
+    # Backwards compatible constructor API
+    def __new__(cls, context=None):
+        return GLib.MainLoop.new(context, False)
 
 
 class _SelectorSource(GLib.Source):
@@ -67,10 +74,11 @@ class _SelectorSource(GLib.Source):
 
 class GLibSelector(selectors._BaseSelectorImpl):
 
-    def __init__(self, context):
+    def __init__(self, context, handle_sigint=False):
         super().__init__()
         self._context = context
-        self._main_loop = GLib.MainLoop.new(self._context, False)
+        self._main_loop = MainLoop(self._context) \
+            if handle_sigint else BasicMainLoop(self._context)
         self._source = _SelectorSource(self._main_loop)
         self._source.attach(self._context)
 
@@ -100,7 +108,7 @@ class GLibSelector(selectors._BaseSelectorImpl):
 
         self._source.clear()
         if may_block:
-            g_main_loop_run(self._main_loop)
+            self._main_loop.run()
         else:
             self._context.iteration(False)
 
